@@ -20,6 +20,10 @@ class DatabaseSingleton:
     def get_db(self):
         return self._db
 
+    def create_tables(self):
+        """Создание всех таблиц через экземпляр Database"""
+        return self._db.create_tables()
+
 
 # ==============================
 # PATTERN 2: FACTORY METHOD для моделей
@@ -213,11 +217,6 @@ class BaseModel:
         # Используем Singleton для получения соединения с БД
         self.db = DatabaseSingleton().get_db()
 
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы в базе данных"""
-        raise NotImplementedError("Метод create_table должен быть реализован в дочернем классе")
-
     def save(self):
         """Сохранение объекта в базу данных"""
         raise NotImplementedError("Метод save должен быть реализован в дочернем классе")
@@ -243,21 +242,6 @@ class Client(BaseModel):
         self.surname = surname
         self.phone_number = phone_number
         self.email = email
-
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы клиентов"""
-        query = """
-        CREATE TABLE IF NOT EXISTS client (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            surname TEXT NOT NULL,
-            phone_number VARCHAR(20) NOT NULL,
-            email TEXT
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
 
     def save(self):
         """Сохранение клиента в базу данных"""
@@ -338,24 +322,6 @@ class Master(BaseModel):
         self.email = email
         self.is_available = is_available
         self.current_orders = current_orders
-
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы мастеров"""
-        query = """
-        CREATE TABLE IF NOT EXISTS master (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            surname TEXT NOT NULL,
-            patronymic TEXT,
-            phone_number VARCHAR(20) NOT NULL,
-            email TEXT,
-            is_available BOOLEAN DEFAULT TRUE,
-            current_orders INTEGER DEFAULT 0
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
 
     def save(self):
         """Сохранение мастера в базу данных"""
@@ -439,20 +405,6 @@ class Product(BaseModel):
         self.material = material
         self.sample = sample
 
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы продуктов"""
-        query = """
-        CREATE TABLE IF NOT EXISTS product (
-            id SERIAL PRIMARY KEY,
-            type TEXT NOT NULL,
-            material TEXT NOT NULL,
-            sample INTEGER
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
-
     def save(self):
         """Сохранение продукта в базу данных"""
         if self.id:
@@ -527,20 +479,6 @@ class Order(BaseModel):
         self.client_id = client_id
         self.data = data or datetime.now().date()
         self.status = status
-
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы заказов"""
-        query = """
-        CREATE TABLE IF NOT EXISTS order_table (
-            id SERIAL PRIMARY KEY,
-            client_id INTEGER REFERENCES client(id),
-            data DATE DEFAULT CURRENT_DATE,
-            status TEXT DEFAULT 'new'
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
 
     def save(self):
         """Сохранение заказа в базу данных"""
@@ -627,20 +565,6 @@ class OrderItem(BaseModel):
         self.product_id = product_id
         self.inform = inform
 
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы позиций заказа"""
-        query = """
-        CREATE TABLE IF NOT EXISTS order_item (
-            id SERIAL PRIMARY KEY,
-            order_id INTEGER REFERENCES order_table(id),
-            product_id INTEGER REFERENCES product(id),
-            inform TEXT
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
-
     def save(self):
         """Сохранение позиции заказа в базу данных"""
         if self.id:
@@ -703,20 +627,6 @@ class WorkOrder(BaseModel):
         self.order_id = order_id
         self.master_id = master_id
         self.data = data or datetime.now().date()
-
-    @classmethod
-    def create_table(cls):
-        """Создание таблицы рабочих заданий"""
-        query = """
-        CREATE TABLE IF NOT EXISTS work_order (
-            id SERIAL PRIMARY KEY,
-            order_id INTEGER REFERENCES order_table(id),
-            master_id INTEGER REFERENCES master(id),
-            data DATE DEFAULT CURRENT_DATE
-        )
-        """
-        db = DatabaseSingleton().get_db()
-        return db.execute_query(query)
 
     def save(self):
         """Сохранение рабочего задания в базу данных"""
@@ -789,12 +699,10 @@ class JewelrySystem:
         self.init_database()
 
     def init_database(self):
-        """Инициализация всех таблиц"""
-        tables = [Client, Master, Product, Order, OrderItem, WorkOrder]
-        for table_class in tables:
-            if not table_class.create_table():
-                print(f"❌ Ошибка создания таблицы {table_class.__name__}")
-                return False
+        """Инициализация всех таблиц через класс Database"""
+        if not self.db.create_tables():
+            print("❌ Ошибка создания таблиц")
+            return False
 
         # Добавляем тестовые данные если таблицы пустые
         if not Master.get_all():
@@ -810,7 +718,7 @@ class JewelrySystem:
         masters_data = [
             {"name": "Иван", "surname": "Петров", "patronymic": "Сергеевич",
              "phone_number": "+79161111111", "email": "master1@almaz.ru"},
-            {"name": "Мария", "surname": "Сидорова", "patronymic": "Ивановна",
+            {"name": "Мария", "surname": "Сидорова", "patronymic": "Ивановna",
              "phone_number": "+79162222222", "email": "master2@almaz.ru"},
             {"name": "Алексей", "surname": "Козлов", "patronymic": "Петрович",
              "phone_number": "+79163333333", "email": "master3@almaz.ru"}
@@ -819,21 +727,6 @@ class JewelrySystem:
         for master_data in masters_data:
             master = master_factory.create_model(**master_data)
             master.save()
-
-        # Используем фабрики для создания продуктов
-        product_factory = ProductFactory()
-        products_data = [
-            {"type": "Кольцо", "material": "Золото", "sample": 585},
-            {"type": "Серьги", "material": "Серебро", "sample": 925},
-            {"type": "Подвеска", "material": "Золото", "sample": 585},
-            {"type": "Браслет", "material": "Серебро", "sample": 925},
-            {"type": "Цепочка", "material": "Золото", "sample": 585},
-            {"type": "Кулон", "material": "Серебро", "sample": 925}
-        ]
-
-        for product_data in products_data:
-            product = product_factory.create_model(**product_data)
-            product.save()
 
         print("✅ Добавлены тестовые данные")
 
@@ -895,4 +788,3 @@ class JewelrySystem:
         print(f"📦 Заказы: {len(orders)} (новых: {len(new_orders)})")
 
         print("=" * 50)
-

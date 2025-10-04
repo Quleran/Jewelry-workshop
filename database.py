@@ -78,20 +78,83 @@ class Database:
 
         return decoded_result
 
-    def test_connection(self):
-        """Тестирование подключения к базе данных"""
-        try:
-            with self.conn.cursor() as cursor:
-                cursor.execute("SET client_encoding TO 'UTF8';")
-                cursor.execute("SELECT version();")
-                version = cursor.fetchone()
-                print(f"📊 Версия PostgreSQL: {version[0]}")
+    def create_tables(self):
+        """Создание всех таблиц в базе данных"""
+        tables_creation = [
+            # Таблица клиентов
+            """
+            CREATE TABLE IF NOT EXISTS client (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                surname TEXT NOT NULL,
+                phone_number VARCHAR(20) NOT NULL,
+                email TEXT
+            )
+            """,
+            # Таблица мастеров
+            """
+            CREATE TABLE IF NOT EXISTS master (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                surname TEXT NOT NULL,
+                patronymic TEXT,
+                phone_number VARCHAR(20) NOT NULL,
+                email TEXT,
+                is_available BOOLEAN DEFAULT TRUE,
+                current_orders INTEGER DEFAULT 0
+            )
+            """,
+            # Таблица продуктов
+            """
+            CREATE TABLE IF NOT EXISTS product (
+                id SERIAL PRIMARY KEY,
+                type TEXT NOT NULL,
+                material TEXT NOT NULL,
+                sample INTEGER
+            )
+            """,
+            # Таблица заказов
+            """
+            CREATE TABLE IF NOT EXISTS order_table (
+                id SERIAL PRIMARY KEY,
+                client_id INTEGER REFERENCES client(id),
+                data DATE DEFAULT CURRENT_DATE,
+                status TEXT DEFAULT 'new'
+            )
+            """,
+            # Таблица позиций заказа
+            """
+            CREATE TABLE IF NOT EXISTS order_item (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES order_table(id),
+                product_id INTEGER REFERENCES product(id),
+                inform TEXT
+            )
+            """,
+            # Таблица рабочих заданий
+            """
+            CREATE TABLE IF NOT EXISTS work_order (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES order_table(id),
+                master_id INTEGER REFERENCES master(id),
+                data DATE DEFAULT CURRENT_DATE
+            )
+            """
+        ]
 
-            return True
-        except Exception as e:
-            print(f"❌ Ошибка тестирования подключения: {e}")
-            return False
+        success_count = 0
+        for i, query in enumerate(tables_creation):
+            try:
+                result = self.execute_query(query)
+                if result:
+                    success_count += 1
+                else:
+                    print(f"❌ Ошибка создания таблицы {i + 1}")
+            except Exception as e:
+                print(f"❌ Ошибка при создании таблицы {i + 1}: {e}")
 
+        print(f"✅ Создано таблиц: {success_count}/{len(tables_creation)}")
+        return success_count == len(tables_creation)
     def close(self):
         """Закрытие соединения с базой данных"""
         if self.conn:
