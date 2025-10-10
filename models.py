@@ -210,6 +210,722 @@ class OrderBuilder:
         return result
 
 
+# ==============================
+# PATTERN 4: FACADE для управления заказами
+# ==============================
+class OrderManagementFacade:
+    """Фасад для упрощенного управления сложной системой заказов"""
+
+    def __init__(self, jewelry_system):
+        self.system = jewelry_system
+        self._logger = OrderLogger()
+
+    def create_simple_order(self, client_name, client_surname, client_phone,
+                            product_type, material, sample, client_email=None, product_info=None):
+        """Создание простого заказа в одну операцию"""
+        print(f"\n🎯 Создание простого заказа для {client_name} {client_surname}")
+
+        try:
+            # Используем строитель через фасад
+            builder = self.system.get_order_builder()
+
+            result = (builder
+                      .set_client(
+                name=client_name,
+                surname=client_surname,
+                phone_number=client_phone,
+                email=client_email
+            )
+                      .add_product(
+                product_type=product_type,
+                material=material,
+                sample=sample,
+                inform=product_info
+            )
+                      .assign_master()  # Автоматическое назначение мастера
+                      .build())
+
+            # Логируем создание заказа
+            self._logger.log(f"Создан заказ #{result['order'].id} для клиента {client_phone}")
+
+            print(f"✅ Заказ успешно создан! ID: {result['order'].id}")
+            return result
+
+        except Exception as e:
+            error_msg = f"Ошибка создания заказа: {e}"
+            self._logger.log(error_msg, level="ERROR")
+            print(f"❌ {error_msg}")
+            return None
+
+    def create_advanced_order(self, client_data, products_data, master_id=None, status='new'):
+        """Создание продвинутого заказа с дополнительными опциями"""
+        print(f"\n🎯 Создание продвинутого заказа")
+
+        try:
+            builder = self.system.get_order_builder()
+
+            # Установка клиента
+            if 'id' in client_data:
+                builder.set_existing_client(client_data['id'])
+            else:
+                builder.set_client(**client_data)
+
+            # Добавление продуктов
+            for product in products_data:
+                if 'id' in product:
+                    builder.add_existing_product(**product)
+                else:
+                    builder.add_product(**product)
+
+            # Назначение мастера
+            if master_id:
+                builder.assign_master(master_id=master_id)
+            else:
+                builder.assign_master()
+
+            # Установка статуса
+            builder.set_status(status)
+
+            result = builder.build()
+
+            # Логируем создание заказа
+            order_info = f"Создан продвинутый заказ #{result['order'].id}, статус: {status}"
+            self._logger.log(order_info)
+
+            print(f"✅ Продвинутый заказ создан! ID: {result['order'].id}, Статус: {status}")
+            return result
+
+        except Exception as e:
+            error_msg = f"Ошибка создания продвинутого заказа: {e}"
+            self._logger.log(error_msg, level="ERROR")
+            print(f"❌ {error_msg}")
+            return None
+
+    def get_order_summary(self, order_id):
+        """Получение сводной информации о заказе"""
+        print(f"\n📊 Получение сводки по заказу #{order_id}")
+
+        order = Order.get_by_id(order_id)
+        if not order:
+            print("❌ Заказ не найден")
+            return None
+
+        client = order.get_client()
+        items = order.get_order_items()
+        work_order = order.get_work_order()
+        master = work_order.get_master() if work_order else None
+
+        summary = {
+            'order': order,
+            'client': client,
+            'items': items,
+            'master': master,
+            'work_order': work_order,
+            'total_products': len(items)
+        }
+
+        # Вывод информации
+        print(f"📦 Заказ #{order.id}")
+        print(f"👤 Клиент: {client.name} {client.surname}")
+        print(f"📞 Телефон: {client.phone_number}")
+        print(f"🔄 Статус: {order.status}")
+        print(f"👨‍🔧 Мастер: {master.name if master else 'Не назначен'}")
+        print(f"📋 Товаров в заказе: {len(items)}")
+
+        return summary
+
+    def change_order_status(self, order_id, new_status):
+        """Изменение статуса заказа"""
+        print(f"\n🔄 Изменение статуса заказа #{order_id} на '{new_status}'")
+
+        order = Order.get_by_id(order_id)
+        if not order:
+            print("❌ Заказ не найден")
+            return False
+
+        old_status = order.status
+        order.status = new_status
+        success = order.save()
+
+        if success:
+            self._logger.log(f"Статус заказа #{order_id} изменен: {old_status} -> {new_status}")
+            print(f"✅ Статус заказа успешно изменен")
+        else:
+            print(f"❌ Ошибка изменения статуса заказа")
+
+        return success
+
+
+class OrderLogger:
+    """Простой логгер для фасада"""
+
+    def log(self, message, level="INFO"):
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_entry = f"[{timestamp}] {level}: {message}"
+        print(f"📝 {log_entry}")
+
+
+# ==============================
+# PATTERN 5: DECORATOR для дополнительных услуг заказа
+# ==============================
+class OrderDecorator(ABC):
+    """Абстрактный декоратор для заказов"""
+
+    def __init__(self, order_component):
+        self._order_component = order_component
+
+    @abstractmethod
+    def get_description(self):
+        pass
+
+    @abstractmethod
+    def get_total_cost(self):
+        pass
+
+    @abstractmethod
+    def get_additional_info(self):
+        pass
+
+
+class BaseOrderComponent:
+    """Базовый компонент заказа"""
+
+    def __init__(self, order, base_cost=0):
+        self.order = order
+        self._base_cost = base_cost
+
+    def get_description(self):
+        return "Базовый заказ"
+
+    def get_total_cost(self):
+        return self._base_cost
+
+    def get_additional_info(self):
+        return {}
+
+
+class UrgentOrderDecorator(OrderDecorator):
+    """Декоратор срочного заказа"""
+
+    def __init__(self, order_component, urgency_level="standard"):
+        super().__init__(order_component)
+        self.urgency_level = urgency_level
+        self._urgency_costs = {
+            "standard": 500,
+            "express": 1000,
+            "super_express": 2000
+        }
+
+    def get_description(self):
+        base_desc = self._order_component.get_description()
+        level_names = {
+            "standard": "Срочный",
+            "express": "Экспресс",
+            "super_express": "Супер-экспресс"
+        }
+        return f"{base_desc} + {level_names[self.urgency_level]}"
+
+    def get_total_cost(self):
+        base_cost = self._order_component.get_total_cost()
+        urgency_cost = self._urgency_costs.get(self.urgency_level, 0)
+        return base_cost + urgency_cost
+
+    def get_additional_info(self):
+        base_info = self._order_component.get_additional_info()
+        base_info.update({
+            "urgent": True,
+            "urgency_level": self.urgency_level,
+            "urgency_cost": self._urgency_costs.get(self.urgency_level, 0)
+        })
+        return base_info
+
+
+class InsuranceDecorator(OrderDecorator):
+    """Декоратор страхования заказа"""
+
+    def __init__(self, order_component, insurance_amount=10000):
+        super().__init__(order_component)
+        self.insurance_amount = insurance_amount
+        self._insurance_cost = insurance_amount * 0.01  # 1% от страховой суммы
+
+    def get_description(self):
+        base_desc = self._order_component.get_description()
+        return f"{base_desc} + Страхование ({self.insurance_amount} руб.)"
+
+    def get_total_cost(self):
+        base_cost = self._order_component.get_total_cost()
+        return base_cost + self._insurance_cost
+
+    def get_additional_info(self):
+        base_info = self._order_component.get_additional_info()
+        base_info.update({
+            "insured": True,
+            "insurance_amount": self.insurance_amount,
+            "insurance_cost": self._insurance_cost
+        })
+        return base_info
+
+
+class GiftPackageDecorator(OrderDecorator):
+    """Декоратор подарочной упаковки"""
+
+    def __init__(self, order_component, package_type="standard"):
+        super().__init__(order_component)
+        self.package_type = package_type
+        self._package_costs = {
+            "standard": 300,
+            "premium": 800,
+            "luxury": 1500
+        }
+
+    def get_description(self):
+        base_desc = self._order_component.get_description()
+        type_names = {
+            "standard": "Подарочная упаковка",
+            "premium": "Премиум упаковка",
+            "luxury": "Элитная упаковка"
+        }
+        return f"{base_desc} + {type_names[self.package_type]}"
+
+    def get_total_cost(self):
+        base_cost = self._order_component.get_total_cost()
+        package_cost = self._package_costs.get(self.package_type, 0)
+        return base_cost + package_cost
+
+    def get_additional_info(self):
+        base_info = self._order_component.get_additional_info()
+        base_info.update({
+            "gift_package": True,
+            "package_type": self.package_type,
+            "package_cost": self._package_costs.get(self.package_type, 0)
+        })
+        return base_info
+
+
+class OrderEnhancementService:
+    """Сервис для применения декораторов к заказам"""
+
+    @staticmethod
+    def create_enhanced_order(base_order, enhancements):
+        """
+        Создание улучшенного заказа с применением декораторов
+
+        Args:
+            base_order: Базовый объект заказа
+            enhancements: Словарь с улучшениями
+                Пример: {
+                    'urgent': 'express',
+                    'insurance': 15000,
+                    'gift_package': 'premium'
+                }
+        """
+        base_cost = 0  # Базовая стоимость может рассчитываться из продуктов заказа
+
+        order_component = BaseOrderComponent(base_order, base_cost)
+
+        # Применяем декораторы в зависимости от запрошенных улучшений
+        if 'urgent' in enhancements:
+            order_component = UrgentOrderDecorator(order_component, enhancements['urgent'])
+
+        if 'insurance' in enhancements:
+            order_component = InsuranceDecorator(order_component, enhancements['insurance'])
+
+        if 'gift_package' in enhancements:
+            order_component = GiftPackageDecorator(order_component, enhancements['gift_package'])
+
+        return order_component
+
+
+# ==============================
+# PATTERN 6: ADAPTER для системы уведомлений
+# ==============================
+class NotificationSender(ABC):
+    """Абстрактный интерфейс отправителя уведомлений (целевой интерфейс)"""
+
+    @abstractmethod
+    def send(self, recipient, message, subject=None):
+        pass
+
+    @abstractmethod
+    def get_status(self, message_id):
+        pass
+
+    @abstractmethod
+    def get_sender_type(self):
+        pass
+
+
+# Внешние сервисы уведомлений с несовместимыми интерфейсами
+class SMTPEmailService:
+    """Внешний класс Email сервиса с несовместимым интерфейсом"""
+
+    def send_email(self, to_address, from_address, email_subject, body, cc_list=None, bcc_list=None):
+        """SMTP сервис требует много специфических параметров"""
+        print(f"SMTP: Отправка email на {to_address}")
+        # Имитация отправки email
+        return {
+            "message_id": f"email_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "status": "delivered",
+            "service": "smtp",
+            "recipient": to_address
+        }
+
+    def check_email_status(self, message_id):
+        """SMTP проверка статуса"""
+        return {
+            "message_id": message_id,
+            "status": "delivered",
+            "opened": True,
+            "clicks": 0
+        }
+
+
+class TwilioSMSService:
+    """Внешний класс SMS сервиса (Twilio-like API)"""
+
+    def send_sms_message(self, phone_number, text_content, from_number=None, media_url=None):
+        """Twilio работает с phone numbers и имеет другие параметры"""
+        print(f"Twilio: Отправка SMS на {phone_number}")
+        return {
+            "sid": f"SM{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "status": "sent",
+            "to": phone_number,
+            "body": text_content
+        }
+
+    def get_message_status(self, message_sid):
+        """Twilio проверка статуса"""
+        return {
+            "sid": message_sid,
+            "status": "delivered",
+            "error_code": None
+        }
+
+
+class TelegramBotAPI:
+    """Внешний класс Telegram Bot API"""
+
+    def send_telegram_message(self, chat_id, text, parse_mode=None, reply_markup=None):
+        """Telegram Bot API работает с chat_id и имеет свои параметры"""
+        print(f"Telegram: Отправка сообщения в chat {chat_id}")
+        return {
+            "message_id": datetime.now().timestamp(),
+            "chat": {"id": chat_id},
+            "text": text,
+            "date": datetime.now().timestamp()
+        }
+
+    def get_chat_member(self, chat_id, user_id):
+        """Telegram метод для получения информации о пользователе"""
+        return {
+            "user": {
+                "id": user_id,
+                "first_name": "User",
+                "username": "username"
+            },
+            "status": "member"
+        }
+
+
+# Адаптеры для приведения интерфейсов к единому стандарту
+class EmailNotificationAdapter(NotificationSender):
+    """Адаптер для Email уведомлений"""
+
+    def __init__(self, email_service):
+        self.email_service = email_service
+        self.default_from = "jewelry-shop@almaz.ru"
+
+    def send(self, recipient, message, subject=None):
+        # Преобразуем параметры для SMTP сервиса
+        email_subject = subject or "Уведомление от ювелирной мастерской"
+
+        # Вызываем метод SMTP сервиса с преобразованными параметрами
+        result = self.email_service.send_email(
+            to_address=recipient,
+            from_address=self.default_from,
+            email_subject=email_subject,
+            body=message
+        )
+
+        # Преобразуем результат к нашему формату
+        return {
+            "message_id": result["message_id"],
+            "status": "success" if result["status"] == "delivered" else "failed",
+            "recipient": recipient,
+            "service": "email"
+        }
+
+    def get_status(self, message_id):
+        result = self.email_service.check_email_status(message_id)
+
+        return {
+            "message_id": message_id,
+            "status": result["status"],
+            "details": {
+                "opened": result.get("opened", False),
+                "clicks": result.get("clicks", 0)
+            },
+            "service": "email"
+        }
+
+    def get_sender_type(self):
+        return "email"
+
+
+class SMSNotificationAdapter(NotificationSender):
+    """Адаптер для SMS уведомлений"""
+
+    def __init__(self, sms_service):
+        self.sms_service = sms_service
+        self.default_from = "+79990001122"  # Наш номер Twilio
+
+    def send(self, recipient, message, subject=None):
+        # Преобразуем параметры для Twilio API
+        # Убираем возможные символы из номера телефона
+        phone_number = recipient.replace('+', '').replace(' ', '').replace('-', '')
+
+        # Добавляем subject к сообщению если есть
+        full_message = message
+        if subject:
+            full_message = f"{subject}: {message}"
+
+        # Вызываем метод Twilio с преобразованными параметрами
+        result = self.sms_service.send_sms_message(
+            phone_number=phone_number,
+            text_content=full_message,
+            from_number=self.default_from
+        )
+
+        # Преобразуем результат к нашему формату
+        return {
+            "message_id": result["sid"],
+            "status": "success" if result["status"] == "sent" else "failed",
+            "recipient": recipient,
+            "service": "sms"
+        }
+
+    def get_status(self, message_id):
+        result = self.sms_service.get_message_status(message_id)
+
+        return {
+            "message_id": message_id,
+            "status": result["status"],
+            "details": {
+                "error_code": result.get("error_code")
+            },
+            "service": "sms"
+        }
+
+    def get_sender_type(self):
+        return "sms"
+
+
+class TelegramNotificationAdapter(NotificationSender):
+    """Адаптер для Telegram уведомлений"""
+
+    def __init__(self, telegram_bot):
+        self.telegram_bot = telegram_bot
+
+    def send(self, recipient, message, subject=None):
+        # Преобразуем параметры для Telegram API
+        # recipient должен быть chat_id для Telegram
+        try:
+            chat_id = int(recipient)
+        except ValueError:
+            # Если передан username, получаем chat_id (в реальной системе)
+            chat_id = self._get_chat_id_by_username(recipient)
+
+        # Форматируем сообщение
+        full_message = message
+        if subject:
+            full_message = f"**{subject}**\n\n{message}"
+
+        # Вызываем метод Telegram Bot API
+        result = self.telegram_bot.send_telegram_message(
+            chat_id=chat_id,
+            text=full_message,
+            parse_mode="Markdown"
+        )
+
+        # Преобразуем результат к нашему формату
+        return {
+            "message_id": str(result["message_id"]),
+            "status": "success",
+            "recipient": recipient,
+            "service": "telegram"
+        }
+
+    def get_status(self, message_id):
+        # В Telegram сообщения доставляются мгновенно
+        return {
+            "message_id": message_id,
+            "status": "delivered",
+            "service": "telegram"
+        }
+
+    def get_sender_type(self):
+        return "telegram"
+
+    def _get_chat_id_by_username(self, username):
+        """Вспомогательный метод для получения chat_id по username"""
+        # В реальной системе здесь был бы запрос к Telegram API
+        # Для демонстрации возвращаем фиктивный ID
+        return 123456789
+
+
+class NotificationService:
+    """Сервис для работы с уведомлениями через адаптеры"""
+
+    def __init__(self):
+        self.adapters = {
+            'email': EmailNotificationAdapter(SMTPEmailService()),
+            'sms': SMSNotificationAdapter(TwilioSMSService()),
+            'telegram': TelegramNotificationAdapter(TelegramBotAPI())
+        }
+
+        # Настройки по умолчанию для разных типов событий
+        self.notification_rules = {
+            'order_created': ['email', 'sms'],
+            'order_ready': ['sms', 'telegram'],
+            'master_assigned': ['email'],
+            'status_changed': ['email', 'sms'],
+            'urgent': ['sms', 'telegram']
+        }
+
+    def send_notification(self, recipient, message, notification_type='info', channels=None, subject=None):
+        """Отправка уведомления через выбранные каналы"""
+        print(f"\n🔔 Отправка уведомления типа '{notification_type}'")
+        print(f"📨 Получатель: {recipient}")
+        print(f"📝 Сообщение: {message}")
+
+        # Определяем каналы для отправки
+        if channels is None:
+            channels = self.notification_rules.get(notification_type, ['email'])
+
+        results = []
+        for channel in channels:
+            if channel in self.adapters:
+                try:
+                    adapter = self.adapters[channel]
+                    result = adapter.send(recipient, message, subject)
+                    results.append(result)
+
+                    status_icon = "✅" if result['status'] == 'success' else "❌"
+                    print(f"   {status_icon} {channel.upper()}: {result['status']}")
+
+                except Exception as e:
+                    error_result = {
+                        'service': channel,
+                        'status': 'error',
+                        'error': str(e)
+                    }
+                    results.append(error_result)
+                    print(f"   ❌ {channel.upper()}: ошибка - {e}")
+            else:
+                print(f"   ⚠️  Канал '{channel}' не поддерживается")
+
+        return results
+
+    def send_order_created_notification(self, order, client):
+        """Специализированный метод для уведомления о создании заказа"""
+        message = f"""
+        🎉 Ваш заказ #{order.id} успешно создан!
+
+        📦 Детали заказа:
+        • Номер: #{order.id}
+        • Дата: {order.data}
+        • Статус: {order.status}
+
+        Мы свяжемся с вами для уточнения деталей.
+        Спасибо, что выбрали нашу мастерскую! ✨
+        """
+
+        subject = f"Заказ #{order.id} создан"
+
+        return self.send_notification(
+            recipient=client.phone_number,  # Для SMS
+            message=message,
+            notification_type='order_created',
+            subject=subject
+        )
+
+    def send_master_assigned_notification(self, order, master, client):
+        """Уведомление о назначении мастера"""
+        client_message = f"""
+        👨‍🔧 Мастер назначен на ваш заказ #{order.id}
+
+        Вашим заказом будет заниматься:
+        • Мастер: {master.surname} {master.name} {master.patronymic or ''}
+        • Телефон: {master.phone_number}
+
+        Мы приложим все усилия для качественного выполнения работы!
+        """
+
+        master_message = f"""
+        📋 Вам назначен новый заказ #{order.id}
+
+        Детали заказа:
+        • Клиент: {client.name} {client.surname}
+        • Телефон: {client.phone_number}
+        • Дата создания: {order.data}
+
+        Пожалуйста, свяжитесь с клиентом для уточнения деталей.
+        """
+
+        # Уведомление клиенту
+        client_results = self.send_notification(
+            recipient=client.phone_number,
+            message=client_message,
+            notification_type='master_assigned',
+            subject=f"Мастер назначен для заказа #{order.id}"
+        )
+
+        # Уведомление мастеру
+        master_results = self.send_notification(
+            recipient=master.phone_number,
+            message=master_message,
+            notification_type='master_assigned',
+            subject=f"Новый заказ #{order.id}"
+        )
+
+        return {
+            'client': client_results,
+            'master': master_results
+        }
+
+    def send_order_ready_notification(self, order, client):
+        """Уведомление о готовности заказа"""
+        message = f"""
+        ✅ Ваш заказ #{order.id} готов!
+
+        Заказ ожидает вас в нашей мастерской.
+        Часы работы: пн-пт с 10:00 до 19:00
+
+        При себе иметь документ, удостоверяющий личность.
+        """
+
+        return self.send_notification(
+            recipient=client.phone_number,
+            message=message,
+            notification_type='order_ready',
+            subject=f"Заказ #{order.id} готов!"
+        )
+
+    def get_adapter_status(self, service):
+        """Получение статуса адаптера"""
+        if service in self.adapters:
+            adapter = self.adapters[service]
+            return {
+                'service': service,
+                'type': adapter.get_sender_type(),
+                'status': 'available'
+            }
+        return {'service': service, 'status': 'not_available'}
+
+
+# ==============================
+# БАЗОВЫЕ КЛАССЫ МОДЕЛЕЙ
+# ==============================
 class BaseModel:
     """Базовый класс для всех моделей"""
 
@@ -691,11 +1407,16 @@ class WorkOrder(BaseModel):
         return self.__str__()
 
 
+# ==============================
+# ОСНОВНОЙ КЛАСС СИСТЕМЫ
+# ==============================
 class JewelrySystem:
-    """Основной класс системы"""
+    """Основной класс системы ювелирной мастерской"""
 
     def __init__(self):
         self.db = DatabaseSingleton().get_db()
+        self.order_facade = None
+        self.notification_service = NotificationService()
         self.init_database()
 
     def init_database(self):
@@ -703,6 +1424,9 @@ class JewelrySystem:
         if not self.db.create_tables():
             print("❌ Ошибка создания таблиц")
             return False
+
+        # Инициализируем фасад после создания таблиц
+        self.order_facade = OrderManagementFacade(self)
 
         # Добавляем тестовые данные если таблицы пустые
         if not Master.get_all():
@@ -788,3 +1512,106 @@ class JewelrySystem:
         print(f"📦 Заказы: {len(orders)} (новых: {len(new_orders)})")
 
         print("=" * 50)
+
+    # ==================================================================
+    # МЕТОДЫ ДЛЯ РАБОТЫ С ДОБАВЛЕННЫМИ СТРУКТУРНЫМИ ПАТТЕРНАМИ
+    # ==================================================================
+
+    def get_order_facade(self):
+        """Получение фасада для управления заказами"""
+        return self.order_facade
+
+    def get_notification_service(self):
+        """Получение сервиса уведомлений"""
+        return self.notification_service
+
+    def create_order_with_notifications(self, client_data, products_data):
+        """Создание заказа с автоматическими уведомлениями"""
+        print(f"\n🎯 Создание заказа с уведомлениями для {client_data['name']}")
+
+        try:
+            # Создаем заказ через фасад
+            order_result = self.order_facade.create_simple_order(
+                client_name=client_data['name'],
+                client_surname=client_data['surname'],
+                client_phone=client_data['phone_number'],
+                product_type=products_data[0]['product_type'],
+                material=products_data[0]['material'],
+                sample=products_data[0]['sample']
+            )
+
+            if order_result:
+                # Отправляем уведомления
+                order = order_result['order']
+                client = order_result['client']
+
+                # Уведомление о создании заказа
+                self.notification_service.send_order_created_notification(order, client)
+
+                # Если есть мастер, отправляем уведомление о назначении
+                work_order = order_result.get('work_order')
+                if work_order:
+                    master = work_order.get_master()
+                    if master:
+                        self.notification_service.send_master_assigned_notification(order, master, client)
+
+                return order_result
+
+        except Exception as e:
+            print(f"❌ Ошибка создания заказа с уведомлениями: {e}")
+            return None
+
+    def demonstrate_enhanced_order(self, base_order, enhancements):
+        """Демонстрация работы с улучшенным заказом через декораторы"""
+        print(f"\n🎁 Создание улучшенного заказа с дополнительными услугами")
+
+        enhanced_order = OrderEnhancementService.create_enhanced_order(
+            base_order, enhancements
+        )
+
+        print(f"📝 Описание: {enhanced_order.get_description()}")
+        print(f"💰 Итоговая стоимость: {enhanced_order.get_total_cost()} руб.")
+        print(f"📋 Дополнительная информация: {enhanced_order.get_additional_info()}")
+
+        return enhanced_order
+
+    def send_custom_notification(self, recipient, message, channels=None, subject=None):
+        """Отправка кастомного уведомления"""
+        return self.notification_service.send_notification(
+            recipient=recipient,
+            message=message,
+            channels=channels,
+            subject=subject
+        )
+
+    def get_system_statistics(self):
+        """Получение расширенной статистики системы"""
+        print("\n📊 РАСШИРЕННАЯ СТАТИСТИКА СИСТЕМЫ")
+        print("-" * 40)
+
+        stats = {}
+
+        # Базовая статистика
+        stats['total_clients'] = len(Client.get_all())
+        stats['total_masters'] = len(Master.get_all())
+        stats['total_products'] = len(Product.get_all())
+        stats['total_orders'] = len(Order.get_all())
+
+        # Статистика по статусам заказов
+        stats['new_orders'] = len(Order.get_by_status('new'))
+        stats['in_progress_orders'] = len(Order.get_by_status('in_progress'))
+        stats['completed_orders'] = len(Order.get_by_status('completed'))
+
+        # Статистика по мастерам
+        available_masters = Master.get_available_masters()
+        busy_masters = [m for m in Master.get_all() if not m.is_available]
+        stats['available_masters'] = len(available_masters)
+        stats['busy_masters'] = len(busy_masters)
+
+        # Вывод статистики
+        for key, value in stats.items():
+            readable_key = key.replace('_', ' ').title()
+            print(f"• {readable_key}: {value}")
+
+        return stats
+
